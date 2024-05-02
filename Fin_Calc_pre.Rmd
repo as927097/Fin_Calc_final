@@ -1,0 +1,945 @@
+---
+title: "Financial Calculus Final Project"
+subtitle: "Stochastically Simulating S&P 500 Crediting Interest Rate"  
+author: 
+  - "Angelo Saporito"
+date: '`r Sys.Date()`'
+output:
+  xaringan::moon_reader:
+    css: xaringan-themer.css
+    nature:
+      slideNumberFormat: "%current%"
+      highlightStyle: github
+      highlightLines: true
+      ratio: 16:9
+      countIncrementalSlides: true
+---
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+if (!require("knitr")) {
+   install.packages("knitr")
+   library(knitr)
+}
+if (!require("ggplot2")) {
+   install.packages("ggplot2")
+   library(ggplot2)
+}
+if (!require("quantmod")) {
+   install.packages("quantmod")
+   library(quantmod)
+}
+if (!require("dplyr")) {
+   install.packages("dplyr")
+   library(dplyr)
+}
+if (!require("gganimate")) {
+   install.packages("gganimate")
+   library(gganimate)
+}
+if (!require("png")) {
+   install.packages("png")
+   library(png)
+}
+if (!require("gifski")) {
+   install.packages("gifski")
+   library(gifski)
+}
+if (!require("reshape2")) {
+   install.packages("reshape2")
+   library(reshape2)
+}
+if (!require("moments")) {
+   install.packages("moments")
+   library(moments)
+}
+if (!require("tidyverse")) {
+   install.packages("tidyverse")
+   library(tidyverse)
+}
+if (!require("ggpubr")) {
+   install.packages("ggpubr")
+   library(ggpubr)
+}
+if (!require("cowplot")) {
+   install.packages("cowplot")
+   library(cowplot)
+}
+
+knitr::opts_chunk$set(
+                  cache = FALSE,
+                  echo = TRUE,
+                  message = FALSE, 
+                  warning = FALSE,
+                  hiline = TRUE
+                  )
+```
+
+```{r xaringan-themer, include=FALSE, warning=FALSE}
+library(xaringanthemer)
+  style_duo_accent(primary_color = "#1F4257",
+          secondary_color = "#380F2A",
+          # fonts
+          header_font_google = google_font("Martel"),
+          text_font_google = google_font("Lato"),
+          code_font_google = google_font("Fira Mono"))
+```
+
+class:inverse4, top
+
+<h1 align="center"> Table of Contents</h1>
+
+.pull-left[
+
+- Terms to Know
+  - Annuity
+  - RILA
+  - Buffer
+  - etc.
+  
+- Customer Scenario
+  - Assumptions
+  - Goals
+  
+- Data Collection and Analysis
+
+- Assumptions and Simulation of S&P 500
+  - Geometric Brownian Motion
+  - Simulation of S&P 500
+]
+
+.pull-right[
+- Crediting Method
+    - Index Performance Strategies
+    - Index Precision Strategy
+    - Index Dual Precision Strategy
+    - Index Guard Strategy
+    - Index Protection Strategy
+    
+- Comparisons and Evaluations
+    - Tables (Summary Stats. & Ratios)
+    - Percentile Graphs (Box. & Hist.)
+
+- Proposal (Two Strategies):
+    - Risk-Averse Strategies
+    - Honary Mention (High Risk, High Yield)
+]
+
+---
+class:inverse4, top
+
+<h1 align="center"> Terms to Know </h1>
+
+.pull-left[
+
+11. **Annuity**:  a financial product where an individual pays a lump sum or series of payments to an insurance company in exchange for regular disbursements, typically in retirement.
+
+2. **Registered Index-Linked Annuity (RILA)**: a type of annuity that allows the investor to participate in potential stock market gains while protecting against market losses by linking returns to a specified index, often with a guaranteed minimum return, typically used for retirement planning.
+
+3. **Crediting Interest Rate (f(r))**: the rate at which interest is calculated and applied to the annuity's accumulated value based on the performance of the chosen index.
+
+]
+
+.pull-right[
+
+4. **Buffer Rate**: refers to the percentage of market loss that the investor is protected against. For example, if the buffer rate is 10%, it means that the investor's principal is safeguarded against the first 10% of market losses, with any losses beyond that potentially impacting the investment.
+
+5. **Cap (Floor)**: refers to the maximum (minimum) rate of return that the investor can earn (lose) during a specific period, typically tied to the performance of an underlying index. 
+
+6. **Trigger Rate**: a predefined threshold that, when reached or exceeded by the performance of the underlying index, activates a specific feature or event within the annuity contract, such as a reset of the participation rate or a payout adjustment.
+]
+
+---
+class:inverse4, top
+
+<h1 align="center"> Customer Scenario </h1>
+
+.pull-left[
+<h3> Assumptions </h3>
+
+- Current Age: 54
+
+- Length of Crediting Period: 6 years (1,512 trading days)
+
+- Principal: $100,000
+
+- Investment Focus: We are only consider the crediting period with no withdrawals. The annual return is linked to the RILA strategies. The crediting interest rate is linked to the S&P 500 index.
+]
+
+.pull-right[
+<h3> Goal Outcomes </h3>
+
+- We want to test various RILA strategies provided by Allianz to maximize return and minimize risk within the tolerance of our client.
+
+- We will use various simulations, comparisons and evaluation metrics to propose the best strategies for this specific client.
+
+- Risk Tolerance: Since our client is retiring in 6-years after the annuity matures and the client has not given a tolerance threshold, we will assume moderate risk aversion.
+]
+
+---
+class:inverse4, top
+
+<h1 align="center">Data Collection and Analysis</h1>
+<BR>
+
+.pull-left[
+<h3> Data Collection </h3>
+
+- We will use the R package **quantmod** to import the adjusted closing price of the daily S&P 500 data for 20 years from the Yahoo Finance API.
+
+- We will then log-transform the index to calculate the daily percent change using the following formula: $$GSPC^{per}_n=\ln{(\frac{GSPC_n}{GSPC_{n-1}})}$$
+]
+
+.pull-right[
+<h3> Data Analysis </h3>
+
+- After transforming the data, we will calculate $\sigma$ (volatility) of the daily S&P 500 and calculate $\mu$ (mean) using the following formula: $$\mu_{adj}=\mu+\frac{1}{2}\sigma^2$$
+
+```{r include=FALSE}
+str.date <- Sys.Date()-7300
+
+sp500 <- getSymbols("^GSPC", src="yahoo", from=str.date, auto.assign = FALSE)$GSPC.Adjusted %>%
+  fortify()
+
+sp500 <- sp500 %>%
+  mutate(Log_Return = log(GSPC.Adjusted / lag(GSPC.Adjusted)))
+
+sp500 <- na.omit(sp500)
+
+mu <- mean(sp500$Log_Return, na.rm = TRUE) * 252 # not accurate
+sigma <- sd(sp500$Log_Return, na.rm = TRUE) * sqrt(252)
+mu <- mu + 1/2 * (sigma)^2
+```
+
+
+- The calculated mean is `r round(mu, 4)` and the volatility is `r round(sigma, 4)`.
+]
+
+---
+class:inverse4, top
+
+<h1 align="center"> Assumptions of S&P 500 and Simulations </h1>
+<BR>
+
+.pull-left[
+
+- For our simulations, we will assume the S&P 500 follows **Geometric Brownian Motion** (GBM): $$dF_t=\mu \cdot F(t)dt+ \sigma \cdot F(t)dW_t,$$ where $\mu$ is our (adjusted) mean, $F(t)$ is our simulated S&P 500, $dt$ is out time step, and $dW_t$ is a simulated Wiener Process.
+
+- However, our index is log-transformed such that $F(t)=\ln S(t)$. So, $$S_t=S_{t-1} \cdot e^{(\mu - \frac{1}{2} \sigma^2)dt+ \sigma \cdot (dW_t-dW_{t-1})}$$
+]
+
+.pull-right[
+
+We justify our use of GBM to model the S&P 500 for the following reasons:
+
+- *Continuous Compounding*: GBM assumes continuous compounding of returns, which is a realistic assumption in financial markets where prices can change rapidly and frequently throughout the trading day.
+
+- *Log-Normal Distribution*: GBM generates a log-normal distribution of prices, which aligns with the observed distribution of asset prices in financial markets.
+
+]
+
+---
+class:inverse4, top
+
+<h1 align="center"> S&P 500 Simulation </h1>
+
+.pull-center[
+```{r echo=FALSE}
+# Parameters
+S0 <- 1  # Initial S&P 500 index value
+mu <- mean  # Average annual return (Avg. of the traditional methods and MLE)
+sigma <- sigma  # Volatility (standard deviation of returns) (Avg. of the traditional methods and MLE)
+T <- 6  # Time period in years
+N <- 252 * 6  # Number of steps (daily steps over 6 years)
+M <- 250  # Number of paths
+
+# Time step
+dt <- T / N
+
+# Pre-allocate matrix to store simulation results
+S <- matrix(0, nrow = N + 1, ncol = M)
+S[1,] <- S0
+
+# Simulate paths
+set.seed(123)  # For reproducibility
+for (m in 1:M) {
+  for (i in 1:N) {
+    Z <- rnorm(1)
+    S[i + 1, m] <- S[i, m] * exp((mean(sp500$Log_Return, na.rm = TRUE) * 252) * dt + sigma * sqrt(dt) * Z)
+  }
+}
+```
+
+```{r echo=FALSE, fig.width=7, fig.height=3, out.width = "100%"}
+
+# Plot some paths
+time <- 0:N
+data <- data.frame(time = rep(time, M), S = as.vector(S), Path = rep(1:M, each = N + 1))
+animated <- ggplot(data, aes(x = time, y = S, group = Path)) + geom_line(alpha = 0.1) + 
+  labs(title = "S&P 500 Simulation Paths", x = "Time (Days)", y = "Index Value", subtitle = 'Day: {frame_along}')+
+  transition_reveal(along = time)+
+  theme_minimal()
+
+animate(animated, fps=12)
+```
+]
+
+---
+class: inverse center middle
+
+# Introducing Allianz RILA Strategies
+---
+class:inverse4, top
+
+<h1 align="center"> Performance Strategies (1/3) </h1>
+
+.pull-left[
+```{r echo=FALSE, fig.width=4, fig.height=3.5, out.width = "90%"}
+strategies <- list(
+    Performance1 = list(buff = 0.1, cap = 0.2125),
+    Performance2 = list(buff = 0.2, cap = 0.14),
+    Performance3 = list(buff = 0.3, cap = 0.115),
+    Precision    = list(buff = 0.1, cap = 0.114),
+    DualPrecision = list(buff = 0.1, cap = 0.099),
+    Guard        = list(floor = -0.1, cap = 0.18),
+    Protection   = list(floor = 0, cap = 0.091)
+  )
+
+r <- seq(from = -.15, to = .25, by = .001)
+
+fr_per1 <- numeric(length(r))
+for(i in 1:length(r)){
+  fr_per1[i] <- ifelse(r[i] < 0, min(r[i] + strategies$Performance1$buff, 0), min(r[i], strategies$Performance1$cap))
+}
+
+fr_per2 <- numeric(length(r))
+for(i in 1:length(r)){
+  fr_per2[i] <- ifelse(r[i] < 0, min(r[i] + strategies$Performance2$buff, 0), min(r[i], strategies$Performance2$cap))
+}
+
+fr_per3 <- numeric(length(r))
+for(i in 1:length(r)){
+  fr_per3[i] <- ifelse(r[i] < 0, min(r[i] + strategies$Performance3$buff, 0), min(r[i], strategies$Performance3$cap))
+}
+
+fr_prec <- numeric(length(r))
+for(i in 1:length(r)){
+  fr_prec[i] <- ifelse(r[i] < 0, min(r[i] + strategies$Precision$buff, 0), strategies$Precision$cap)
+}
+
+fr_dprec <- numeric(length(r))
+for(i in 1:length(r)){
+  fr_dprec[i] <- ifelse(r[i] < -strategies$DualPrecision$buff, r[i] + strategies$DualPrecision$buff, strategies$DualPrecision$cap)
+}
+
+fr_guard <- numeric(length(r))
+for(i in 1:length(r)){
+  fr_guard[i] <- max(min(strategies$Guard$cap, r[i]), strategies$Guard$floor)
+}
+
+fr_pro <- numeric(length(r))
+for(i in 1:length(r)){
+  fr_pro[i] <- ifelse(r[i] > 0, strategies$Protection$cap, strategies$Protection$floor)
+}
+
+
+# Create a data frame with all combinations of 'r' and 'f(r)'
+theor_rates <- data.frame(r, fr_per1, fr_per2, fr_per3, fr_prec, fr_dprec, fr_guard, fr_pro)
+
+(Performance1_graph <- ggplot(theor_rates, aes(r, fr_per1))+
+  geom_line(color="blue")+
+  geom_hline(aes(yintercept=0), color="grey", linetype="dashed") +
+  geom_vline(aes(xintercept=0), colour="grey", linetype="dashed")+
+  ylab("f(r)")+
+  ggtitle("1-Year Performance Strategy")+
+  labs(subtitle = "10% Buffer Rate and 21.25% Cap")+
+  theme_minimal())
+```
+]
+
+<BR>
+<BR>
+<BR>
+
+$$
+\large
+f(r)=
+\begin{cases}
+          \min{(r+10\%, \text{ 0.0})}, & \text{if } r < 0 \\
+          \\
+          \min{(r, \text{ 21.25%})}, & \text{if } r\geq 0 
+\end{cases}
+$$
+
+---
+class:inverse4, top
+
+<h1 align="center"> Performance Strategies (2/3) </h1>
+
+.pull-left[
+
+```{r echo=FALSE, fig.width=4, fig.height=3.5, out.width = "90%"}
+(Performance2_graph <- ggplot(theor_rates, aes(r, fr_per2))+
+  geom_line(color="blue")+
+  geom_hline(aes(yintercept=0), color="grey", linetype="dashed") +
+  geom_vline(aes(xintercept=0), colour="grey", linetype="dashed")+
+  ylab("f(r)")+
+  ggtitle("1-Year Performance Strategy")+
+  labs(subtitle = "20% Buffer Rate and 14% Cap")+
+  theme_minimal())
+```
+]
+
+
+<BR>
+<BR>
+<BR>
+
+$$
+\large
+f(r)=
+\begin{cases}
+          \min{(r+20\%, \text{ 0.0})}, & \text{if } r < 0 \\
+          \\
+          \min{(r, \text{ 14%})}, & \text{if } r\geq 0 
+\end{cases}
+$$
+
+---
+class:inverse4, top
+
+<h1 align="center"> Performance Strategies (3/3) </h1>
+
+.pull-left[
+
+```{r echo=FALSE, fig.width=4, fig.height=3.5, out.width = "90%"}
+(Performance3_graph <- ggplot(theor_rates, aes(r, fr_per3))+
+  geom_line(color="blue")+
+  geom_hline(aes(yintercept=0), color="grey", linetype="dashed") +
+  geom_vline(aes(xintercept=0), colour="grey", linetype="dashed")+
+  ylab("f(r)")+
+  ggtitle("1-Year Performance Strategy")+
+  labs(subtitle = "30% Buffer Rate and 11.5% Cap")+
+  theme_minimal())
+```
+]
+
+
+<BR>
+<BR>
+<BR>
+
+$$
+\large
+f(r)=
+\begin{cases}
+          \min{(r+30\%, \text{ 0.0})}, & \text{if } r < 0 \\
+          \\
+          \min{(r, \text{ 11.5%})}, & \text{if } r\geq 0 
+\end{cases}
+$$
+
+
+---
+class:inverse4, top
+
+<h1 align="center"> Precision Strategy </h1>
+
+.pull-left[
+
+```{r echo=FALSE, fig.width=4, fig.height=3.5, out.width = "90%"}
+(Precision_graph <- ggplot(theor_rates, aes(r, fr_prec))+
+  geom_line(color="blue")+
+  geom_hline(aes(yintercept=0), color="grey", linetype="dashed") +
+  geom_vline(aes(xintercept=0), colour="grey", linetype="dashed")+
+  ylab("f(r)")+
+  ggtitle("1-Year Precision Strategy")+
+  labs(subtitle = "10% Buffer Rate and 11.4% Trigger Rate")+
+  theme_minimal())
+```
+]
+
+
+<BR>
+<BR>
+<BR>
+
+$$
+\large
+f(r)=
+\begin{cases}
+          \min{(r+10\%, \text{ 0.0})}, & \text{if } r < 0 \\
+          \\
+          11.4\% , & \text{otherwise}
+\end{cases}
+$$
+
+---
+class:inverse4, top
+
+<h1 align="center"> Dual Precision Strategy </h1>
+
+.pull-left[
+
+```{r echo=FALSE, fig.width=4, fig.height=3.5, out.width = "90%"}
+(DPrecision_graph <- ggplot(theor_rates, aes(r, fr_dprec))+
+  geom_line(color="blue")+
+  geom_hline(aes(yintercept=0), color="grey", linetype="dashed") +
+  geom_vline(aes(xintercept=0), colour="grey", linetype="dashed")+
+  ylab("f(r)")+
+  ggtitle("1-Year Dual Precision Strategy")+
+  labs(subtitle = "10% Buffer Rate and 9.9% Trigger Rate")+
+  theme_minimal())
+```
+]
+
+
+<BR>
+<BR>
+<BR>
+
+$$
+\large
+f(r)=
+\begin{cases}
+           r+10\%, & \text{if } r < -10\% \\
+           \\
+          9.9\%, & \text{if } r\geq 0 
+\end{cases}
+$$
+
+---
+class:inverse4, top
+
+<h1 align="center"> Guard Strategy </h1>
+
+.pull-left[
+
+```{r echo=FALSE, fig.width=4, fig.height=3.5, out.width = "90%"}
+(Guard_graph <- ggplot(theor_rates, aes(r, fr_guard))+
+  geom_line(color="blue")+
+  geom_hline(aes(yintercept=0), color="grey", linetype="dashed") +
+  geom_vline(aes(xintercept=0), colour="grey", linetype="dashed")+
+  ylab("f(r)")+
+  ggtitle("1-Year Guard Strategy")+
+  labs(subtitle = "-10% Floor and 18% Cap")+
+  theme_minimal())
+```
+]
+
+
+<BR>
+<BR>
+<BR>
+
+$$
+\large
+f(r) = \max{(\min{(18\%, r)}, \text{ 10%})}
+$$
+---
+class:inverse4, top
+
+<h1 align="center"> Protection Strategy </h1>
+
+.pull-left[
+
+```{r echo=FALSE, fig.width=4, fig.height=3.5, out.width = "90%"}
+(Protection_graph <- ggplot(theor_rates, aes(r, fr_pro))+
+  geom_line(color="blue")+
+  geom_hline(aes(yintercept=0), color="grey", linetype="dashed") +
+  geom_vline(aes(xintercept=0), colour="grey", linetype="dashed")+
+  ylab("f(r)")+
+  ggtitle("1-Year Protection Strategy")+
+  labs(subtitle = "0% Floor and 9.1% Trigger Rate")+
+  theme_minimal())
+```
+]
+
+
+<BR>
+<BR>
+<BR>
+
+$$
+\large
+f(r)=
+\begin{cases}
+           9.9\%, & \text{if } r < 0 \\
+           \\
+          0\%, & \text{otherwise}
+\end{cases}
+$$
+
+---
+class: center middle
+
+# Comparison and Evaluation of RILA Strategies
+---
+class:inverse4, top
+
+<h2 align="center"> Comparison of RILA Strategies (1/3) </h2>
+
+```{r echo=FALSE}
+mean <- mean(sp500$Log_Return, na.rm = TRUE) * 252 # not accurate
+volatility <- sd(sp500$Log_Return, na.rm = TRUE) * sqrt(252)
+mean <- mean + 1/2 * volatility^2
+```
+
+```{r echo=FALSE}
+# Parameters
+S0 <- 1  # Initial S&P 500 index value
+mu <- mean  # Average annual return (Avg. of the traditional methods and MLE)
+sigma <- volatility  # Volatility (standard deviation of returns) (Avg. of the traditional methods and MLE)
+T <- 6  # Time period in years
+N <- 252 * 6  # Number of steps (daily steps over 6 years)
+M <- 1000  # Number of paths
+
+# Time step
+dt <- T / N
+
+# Pre-allocate matrix to store simulation results
+S <- matrix(0, nrow = N + 1, ncol = M)
+S[1,] <- S0
+
+# Simulate paths
+set.seed(123)  # For reproducibility
+for (m in 1:M) {
+  for (i in 1:N) {
+    Z <- rnorm(1)
+    S[i + 1, m] <- S[i, m] * exp((mu - 0.5 * sigma^2) * dt + sigma * sqrt(dt) * Z)
+  }
+}
+```
+
+```{r echo=FALSE}
+# Initialize the matrix for annual returns
+annual_returns <- matrix(0, nrow = 6, ncol = ncol(S))
+
+for (i in 1 : 6) {
+       start_index <- (i - 1) * 252 + 1
+         end_index <- i * 252 + 1
+    annual_returns[i, ] <- S[end_index, ] / S[start_index, ] - 1
+}
+
+```
+
+```{r echo=FALSE}
+calculateCreditingRates <- function(simRet_) {
+  # simRet_: Simulated annual returns linked to a specific index
+  
+  # Initialize the matrix for annual returns
+  annualReturns <- simRet_
+  duration <- nrow(annualReturns)
+  numSim <- ncol(annualReturns)
+  
+  # Define the parameters for each strategy
+  strategies <- list(
+    Performance1 = list(buff = 0.1, cap = 0.2125),
+    Performance2 = list(buff = 0.2, cap = 0.14),
+    Performance3 = list(buff = 0.3, cap = 0.115),
+    Precision    = list(buff = 0.1, cap = 0.114),
+    DualPrecision = list(buff = 0.1, cap = 0.099),
+    Guard        = list(floor = -0.1, cap = 0.18),
+    Protection   = list(floor = 0, cap = 0.091)
+  )
+  
+  # Initialize the 3D array to store the crediting rates for each strategy
+  creditingRates <- array(dim = c(duration, numSim, 7))
+  
+  # Calculate crediting rates based on annualReturns and the strategies
+  for (year in 1:duration) {
+    for (sim in 1:numSim) {
+      # Extract the annual return for this year and simulation
+      r <- annualReturns[year, sim]
+      
+      # Performance1
+      creditingRates[year, sim, 1] <- ifelse(r < 0, min(r + strategies$Performance1$buff, 0), min(r, strategies$Performance1$cap))
+
+      # Performance2
+      creditingRates[year, sim, 2] <- ifelse(r < 0, min(r + strategies$Performance2$buff, 0), min(r, strategies$Performance2$cap))
+
+      # Performance3
+      creditingRates[year, sim, 3] <- ifelse(r < 0, min(r + strategies$Performance3$buff, 0), min(r, strategies$Performance3$cap))
+
+      # Precision
+      creditingRates[year, sim, 4] <- ifelse(r < 0, min(r + strategies$Precision$buff, 0), strategies$Precision$cap)
+
+      # DualPrecision
+      creditingRates[year, sim, 5] <- ifelse(r < -strategies$DualPrecision$buff, r + strategies$DualPrecision$buff, strategies$DualPrecision$cap)
+
+      # Guard
+      creditingRates[year, sim, 6] <- max(min(strategies$Guard$cap, r), strategies$Guard$floor)
+
+      # Protection
+      creditingRates[year, sim, 7] <- ifelse(r > 0, strategies$Protection$cap, strategies$Protection$floor)
+    }
+  }
+  
+  # Assign names to the third dimension of the array
+  dimnames(creditingRates)[[3]] <- c("Performance1", "Performance2", "Performance3", "Precision", "DualPrecision", "Guard", "Protection")
+  
+  return(creditingRates)
+}
+
+# Simulated annual returns for the future 6 years
+
+
+creditingRates <- calculateCreditingRates(simRet_ = annual_returns)
+
+```
+
+```{r echo=FALSE}
+accAcc <- function(creditingRates, initAccountValue) {
+  # Extract the dimensions of the creditingRates array
+  dims <- dim(creditingRates)
+  duration <- dims[1]
+  numSim <- dims[2]
+  
+  # Initialize the matrix to store the accumulated values for each strategy
+  accumulatedValues <- matrix(nrow = numSim, ncol = 7)
+  colnames(accumulatedValues) <- c("Performance1", "Performance2", "Performance3", "Precision", "DualPrecision", "Guard", "Protection")
+
+  # Loop over each simulation
+  for (sim in 1 : numSim) {
+    # Loop over each strategy
+    for (strategy in 1 : 7) {
+      # Set initial account value for this simulation
+      accountValue <- initAccountValue
+      
+      # Apply the crediting rate for each year
+      for (year in 1 : duration) {
+        rate <- creditingRates[year, sim, strategy]
+        accountValue <- accountValue * (1 + rate)
+      }
+      
+      # Store the final account value in the matrix
+      accumulatedValues[sim, strategy] <- accountValue
+    }
+  }
+
+  return(accumulatedValues)
+}
+
+# Example usage:
+# Assuming creditingRatesArray is the output from calculateCreditingRates(simInd)
+# accumulatedValuesMatrix <- accAcc(creditingRatesArray, initAccountValue = 1000)
+
+iniAccVal <- 100000
+
+simAcc <- accAcc(creditingRates = creditingRates, initAccountValue = iniAccVal)
+
+```
+
+```{r echo=FALSE}
+# Assuming 'creditingRate' is your array
+
+# Reshape the array into long format
+creditingRate_df <- melt(creditingRates, varnames = c("Year", "Simulation", "Strategy"))
+
+# Rename the columns
+colnames(creditingRate_df) <- c("Year", "Simulation", "Strategy", "Rate")
+
+mean_rates <- creditingRate_df %>%
+  group_by(Strategy) %>%
+  summarize(mean_rate = round(mean(Rate),3), sd_rate = round(sd(Rate),3), max_rate = round(max(Rate),3), min_rate = round(min(Rate),3), upper_per = round(quantile(Rate, probs = .95),3), lower_per = round(quantile(Rate, probs = .05),3), skew = skewness(Rate), kurt = kurtosis(Rate), mid_per = round(quantile(Rate, probs = .25),3))
+
+risk_frate <- getSymbols("^FVX", src="yahoo", from=str.date, auto.assign = FALSE)$FVX.Adjusted %>%
+  na.omit() %>%
+  fortify()
+
+  risk_frate <- risk_frate$FVX.Adjusted/100
+  
+  mu_risk_frate <- mean(risk_frate)
+```
+
+```{r echo=FALSE}
+
+calculate_ratios <- function(strategy_data, risk_free_rate) {
+  # Calculate Sharpe ratio
+  strategy_data$Sharpe_ratio <- round((strategy_data$mean_rate - risk_free_rate) / strategy_data$sd_rate, 3)
+  
+  # Calculate Calmar ratio
+  strategy_data$Calmar_ratio <- round(strategy_data$mean_rate / (strategy_data$max_rate - strategy_data$min_rate), 3)
+  
+  # Calculate Modified Sharpe Ratio
+  strategy_data$Modified_Sharpe_ratio <- round((strategy_data$mean_rate - risk_free_rate) / 
+                                        sqrt(strategy_data$sd_rate^2 + 
+                                             (1/3) * strategy_data$skew^2 + 
+                                             (1/36) * strategy_data$kurt^2),3)
+  
+  return(strategy_data)
+}
+
+# Usage example:
+# Assuming your tibble is named 'strategy_data' and the risk-free rate is stored in 'risk_free_rate'
+mean_rates <- calculate_ratios(mean_rates, mu_risk_frate)
+
+kable(mean_rates[,c(1:5,10,7)], caption = "Descriptive Statistics of Return Rates by Strategy", col.names = c("Strategy","Mean","St. D.","Max","Min","25th Perc","5th Perc"))
+```
+
+---
+class:inverse4, top
+
+<h2 align="center"> Comparison of RILA Strategies (2/3) </h2>
+
+.pull-center[
+```{r echo=FALSE}
+# Function to calculate the percentiles
+calculatePercentiles <- function(vec) {
+  sapply(1:100, function(p) quantile(vec, probs = p / 100, na.rm = TRUE))
+}
+
+# Calculate mean, std, and percentiles for each strategy
+strategyStats <- lapply(1:ncol(simAcc), function(col) {
+  data <- simAcc[, col]
+  list(
+    mean = mean(data, na.rm = TRUE),
+    std = sd(data, na.rm = TRUE),
+    percentiles = calculatePercentiles(data)
+  )
+})
+
+# Creating a data frame for easy viewing
+strategyStatsDF <- data.frame(
+  Strategy = colnames(simAcc),
+  Mean = sapply(strategyStats, function(x) x$mean),
+  Std = sapply(strategyStats, function(x) x$std),
+  stringsAsFactors = FALSE
+)
+
+# Adding percentiles to the data frame
+for (p in 1:100) {
+  strategyStatsDF[paste("P", p, sep = "")] <- sapply(strategyStats, function(x) x$percentiles[p])
+}
+
+# Assuming strategyStatsDF is already created and contains the percentile data
+# Reshaping the data into a long format
+longData <- melt(strategyStatsDF, id.vars = "Strategy", variable.name = "Percentile", value.name = "AccumulatedValue")
+longData$Percentile <- as.numeric(gsub("P", "", longData$Percentile))  # Convert Percentile to numeric
+
+stacked_data <- longData %>%
+  pivot_longer(cols = starts_with("P"), 
+               names_to = "percentile", 
+               values_to = "value") %>%
+  mutate(percentile = as.numeric(gsub("P", "", percentile))) %>%
+  arrange(Strategy, percentile) %>%
+  select(Strategy, AccumulatedValue, value) %>%
+  na.omit()
+
+ordered_data <- stacked_data %>%
+  filter(value == 50) %>%
+  arrange(desc(AccumulatedValue))
+
+stacked_data_ordered <- stacked_data %>%
+  arrange(factor(Strategy, levels = ordered_data$Strategy))
+```
+
+```{r echo=FALSE, fig.align='center', fig.height=6, fig.width=10}
+get_box_stats <- function(y, upper_limit = max(df$mpg) * 1.15) {
+  return(data.frame(
+    y = 0.95 * upper_limit,
+    label = paste(
+      "Count =", length(y), "\n",
+      "Mean =", round(mean(y), 2), "\n",
+      "Median =", round(median(y), 2), "\n"
+    )
+  ))
+}
+
+ggplot(stacked_data_ordered, aes(x = factor(Strategy, levels = unique(stacked_data_ordered$Strategy)), y = AccumulatedValue, fill = factor(Strategy, levels = unique(stacked_data_ordered$Strategy)))) +
+  geom_boxplot() +
+  xlab("Strategy")+
+  ylab("Accumulated Value")+
+  stat_summary(fun.data = get_box_stats, geom = "text", hjust = 0.5, vjust = 0.9) +
+  theme_classic()+
+  labs(title = "Box Plot of Accumulated Value of RILA Strategies", subtitle = "Ordered by Descending Mean")+
+  scale_fill_brewer(name = "Strategy", palette = "Blues")
+```
+]
+
+---
+class:inverse4, top
+
+<h2 align="center"> Comparison of RILA Strategies (3/3) </h2>
+
+```{r echo=FALSE}
+kable(mean_rates[,c(1,11:13)], caption = "Risk Ratios by Strategy", col.names = c("Strategy","Sharpe","Calmar","Mod. Sharpe"))
+```
+
+<BR>
+
+.pull-center[
+
+$$
+\begin{matrix}
+\text{Sharpe}=\frac{R_p-R_f}{\sigma_p}, & \text{Calmar}=\frac{R_p}{\max{(r)}-\min{(r)}}, & \text{Modified Sharpe}=\frac{R_p-R_f}{\sqrt{\text{Var(r)}+\frac{\text{Skew}^2}{3}+\frac{\text{Kurt.}^2}{36}}}
+\end{matrix}
+$$
+]
+
+---
+class:inverse4, top
+
+<h2 align="center"> Proposal (Risk-Averse) </h2>
+
+.pull-left[
+- We recommend these strategies in the order in which they are presented:
+      - **Performance 2** (20% buff, 14% cap) allows for larger gains during bull markets, allowing you to take advantage of market gains while modestly protecting against market downturns. High mean return rate, moderate volatility, and above average ratio scores
+      - **Performance 3** (30% buff, 11.5% cap) provides similar advantages as Performance 2; however, its gains, as well as its losses, are capped below that of Performance 2. It also ranks higher in Sharpe, Calmar and Modified Sharpe ratios then Performance 2
+      - **Protection** (0% floor, 9.1% trigger) is the least risky investment option. Its gains are severely capped, but so are its losses. Intended for investors with zero risk tolerance 
+]
+
+.pull-right[
+<BR>
+<BR>
+```{r echo=FALSE, fig.height=5, fig.width=7}
+perf_data <- stacked_data[c(301:500, 601:700),]
+
+# 1. Create the histogram plot
+phist <- gghistogram(
+  perf_data, x = "AccumulatedValue", 
+  add = "mean", rug = TRUE,
+  fill = "Strategy", palette = c("#c6dbef","#08519c", "#6baed6"),
+  xlab = "Accumulated Value"
+)
+
+# 2. Create the density plot with y-axis on the right
+# Remove x axis elements
+pdensity <- ggdensity(
+  perf_data, x = "AccumulatedValue", 
+  color= "Strategy", palette = c("#c6dbef","#08519c","#6baed6"),
+  alpha = 0) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.05)), position = "right")  +
+  theme_half_open(11, rel_small = 1) +
+  rremove("x.axis")+
+  rremove("xlab") +
+  rremove("x.text") +
+  rremove("x.ticks") +
+  rremove("legend")
+
+# 3. Align the two plots and then overlay them.
+aligned_plots <- align_plots(phist, pdensity, align="hv", axis="tblr")
+ggdraw(aligned_plots[[1]]) + draw_plot(aligned_plots[[2]])
+
+```
+]
+
+---
+class:inverse4, top
+
+<h2 align="center"> Conclusion & Final Proposal </h2>
+
+.pull-left[
+
+- **Mean Return Rate**: Performance 2 offers a competitive mean return rate of `r mean_rates$mean_rate[2]*100`%, which is higher than the other strategies except for Performance 1.
+
+- **Downside Protection**: Performance 2 provides a buffer of 20% against downside risk. This means that even in a negative market scenario, the client's investment is protected up to a certain extent, reducing the potential for significant losses and providing a level of security and peace of mind for the client as they approach retirement.
+
+- **Potential Gains**: While Performance 2 offers downside protection, it still maintains a respectable cap rate of 14%, indicating the potential for significant gains if the market performs well. This balance between downside protection and upside potential aligns well with the client's retirement objectives, as they can benefit from market gains while having a safety net against losses.
+]
+
+.pull-left[
+- **Risk-Adjusted Returns**: Although Performance 2 may score lower on some risk-adjusted ratios like Sharpe and Calmar ratios compared to Performance 3 and Protection, it's essential to consider the overall risk-return profile in the context of your client's retirement goals. Performance 2 strikes a balance between risk and return that may be more suitable for the client's needs, especially considering the shorter time horizon to retirement.
+
+- **Client's Age and Time Horizon**: Given that the client is 54 years old and retiring in 6 years, preserving capital and minimizing downside risk become crucial priorities. Performance 2's combination of downside protection and potential gains makes it well-suited for this stage of the client's investment journey.
+
+]
